@@ -6,7 +6,7 @@ and suggesting occurs in a public channel; voting is by private ballot over DM
 with the bot. Once all ballots are received, the bot posts the results in the
 public channel.
 
-The bot uses the [Condorcetmethod](https://en.wikipedia.org/wiki/Condorcet_method) 
+The bot uses the [Condorcet method](https://en.wikipedia.org/wiki/Condorcet_method) 
 for voting with the [Schulze method](https://en.wikipedia.org/wiki/Schulze_method) 
 used to handle situations with no Condorcet winner. These are custom
 implementations with limited testing. I do not recommend depending upon them.
