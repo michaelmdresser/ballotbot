@@ -1,15 +1,17 @@
 # ballotbot
-Discord bot for small-group voting.
+
+Discord bot for small-group voting. Implements the [Condorcet method](https://en.wikipedia.org/wiki/Condorcet_method) 
+and the [Schulze method](https://en.wikipedia.org/wiki/Schulze_method) for voting.
 
 Users interact by joining as voters, suggesting candidates, and voting. Joining
 and suggesting occurs in a public channel; voting is by private ballot over DM
 with the bot. Once all ballots are received, the bot posts the results in the
 public channel.
 
-The bot uses the [Condorcet method](https://en.wikipedia.org/wiki/Condorcet_method) 
-for voting with the [Schulze method](https://en.wikipedia.org/wiki/Schulze_method) 
-used to handle situations with no Condorcet winner. These are custom
-implementations with limited testing. I do not recommend depending upon them.
+The voting methods used by this bot are custom implementations I made for the
+fun of it. They have limited testing, so I do not recommend depending upon
+them. If you discover incorrect vote behavior please let me know via an
+issue or email.
 
 ## Run it
 
