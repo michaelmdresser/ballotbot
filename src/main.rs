@@ -976,7 +976,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .apply()?;
 
     // Configure the client with your Discord bot token in the environment.
-    let token = std::env::var("DISCORD_TOKEN").expect("Expected DISCORD_TOKEN in the environment");
+    let token = match std::env::var("DISCORD_TOKEN") {
+        Ok(token) => token,
+        Err(_) => {
+            // Try to read token from ./DISCORD_TOKEN.txt if environment variable is not set
+            let token_path = std::path::Path::new("./DISCORD_TOKEN.txt");
+            if token_path.exists() {
+                std::fs::read_to_string(token_path)
+                    .expect("Failed to read DISCORD_TOKEN.txt file")
+                    .trim()
+                    .to_string()
+            } else {
+                panic!("Expected DISCORD_TOKEN in environment or in ./DISCORD_TOKEN.txt file")
+            }
+        }
+    };
     serenity::utils::token::validate(token.clone()).unwrap();
 
     // Initiate a connection to the database file, creating the file if required.
