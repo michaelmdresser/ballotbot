@@ -1,4 +1,4 @@
-# ballotbot
+# ballotbot - Discord bot for running votes
 
 Discord bot for small-group voting. Implements the [Condorcet method](https://en.wikipedia.org/wiki/Condorcet_method) 
 and the [Schulze method](https://en.wikipedia.org/wiki/Schulze_method) for voting.
@@ -12,6 +12,8 @@ The voting methods used by this bot are custom implementations I made for the
 fun of it. They have limited testing, so I do not recommend depending upon
 them. If you discover incorrect vote behavior please let me know via an
 issue or email.
+
+![](media/ballotbotexample.png)
 
 ## Run it
 
