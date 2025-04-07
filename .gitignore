@@ -4,3 +4,4 @@
 tmp/
 *.db
 /target
+/DISCORD_TOKEN.txt
