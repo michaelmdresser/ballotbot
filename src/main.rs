@@ -873,6 +873,16 @@ SELECT
             // TODO: Include options in parsing?
             let option_id_to_option = self.option_id_to_option(&mut vote_tx, session_id).await;
 
+            if ballot.len() != option_id_to_option.len() {
+                dm_respond(&format!(
+                    "Your ballot has {} entries but it must have {} (the same number as the number of options)", ballot.len(), option_id_to_option.len(),
+                ))
+                .await;
+                vote_tx.rollback().await.unwrap();
+                return;
+            }
+            debug!("Verified ballot len");
+
             // TODO: parse, don't validate
             for ballot_entry in ballot.iter() {
                 if !option_id_to_option.contains_key(&ballot_entry) {
@@ -884,7 +894,6 @@ SELECT
                     return;
                 }
             }
-
             debug!("Verified ballot keys");
 
             let author_id = msg.author.id.get().to_string();
