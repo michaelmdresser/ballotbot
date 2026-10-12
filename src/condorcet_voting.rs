@@ -35,7 +35,7 @@ pub mod cv {
                 (_, _) => panic!("huh?!"), // FIXME
             };
             fmt.write_str("\n")?;
-            fmt.write_str("Ballots:")?;
+            fmt.write_str("Ballots:\n")?;
             for ballot in &self.ballots {
                 fmt.write_str(&format!("  {:?}\n", ballot))?;
             }
