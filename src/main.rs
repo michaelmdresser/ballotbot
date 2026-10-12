@@ -18,6 +18,129 @@ struct Bot {
 // suggest (s)
 // vote (v)
 
+const PRETTY_PRINT_LABEL_LEN_CHARS: usize = 20;
+
+// TODO: Better return type
+// TODO: Implement as formatter instead of string-returner? This implementation is
+// pretty ugly
+fn pretty_print_outranking_matrix(
+    matrix: &nalgebra::DMatrix<u32>,
+    option_id_to_option: &BTreeMap<u32, String>, // maps indices to string labels
+) -> Result<String, String> {
+    if matrix.nrows() != matrix.ncols() {
+        return Err("Non-square outranking matrix, that shouldn't happen".into());
+    }
+    if matrix.nrows() != option_id_to_option.len() {
+        return Err("option_id_to_option must have same length as outranking matrix".into());
+    }
+    // TODO: Added up when flipped over the diagonal, all values in the matrix should
+    // be equal (to the number of voters)
+
+    // TODO: Validate that expected option IDs exist. It's a weird convention that I'm using
+    // here, resulting in a BTreeMap instead of a Vec/slice of labels. It's unfortunately
+    // easier to work around that then refactor to stop using the BTreeMap.
+
+    fn index_to_letter_label(index: usize) -> Result<char, String> {
+        if index < 26 {
+            Ok(char::from(b'A' + index as u8))
+        } else {
+            Err(format!("{index} out of bounds for letter label logic"))
+        }
+    }
+    fn index_to_display_label(index: usize, label: &str) -> Result<String, String> {
+        let letter = index_to_letter_label(index)?;
+        let full_label = format!("{letter}. {label}",);
+
+        // truncate to PRETTY_PRINT_LABEL_LEN_CHARS, then pad
+        let mut truncated: String = full_label
+            .chars()
+            .take(PRETTY_PRINT_LABEL_LEN_CHARS)
+            .collect();
+        let padding = PRETTY_PRINT_LABEL_LEN_CHARS - truncated.chars().count();
+        truncated.push_str(&" ".repeat(padding));
+        Ok(truncated)
+    }
+
+    let mut output = String::new();
+    // first row is empty spaces, ┌, then <space><letter><space><letter>, etc., then <space>, then ┐
+    output.push_str(&" ".repeat(PRETTY_PRINT_LABEL_LEN_CHARS));
+    output.push_str(" ┌ ");
+    for col in 0..matrix.ncols() {
+        output.push_str(&format!("{} ", index_to_letter_label(col)?));
+    }
+    output.push_str("┐\n");
+
+    // then there is one row pepr row of the matrix: <label><space>│<space><matrixval>...
+    for row in 0..matrix.nrows() {
+        let label = option_id_to_option
+            .get(&(row as u32))
+            .ok_or("Label index out of range")?;
+        output.push_str(&index_to_display_label(row, label)?);
+        output.push_str(" │ ");
+        for col in 0..matrix.ncols() {
+            let matval = matrix[(row, col)];
+            output.push_str(&format!("{matval} "));
+        }
+        output.push_str("│\n");
+    }
+
+    // then the final row is the mirror of the first
+    output.push_str(&" ".repeat(PRETTY_PRINT_LABEL_LEN_CHARS));
+    output.push_str(" └ ");
+    for i in 0..option_id_to_option.len() {
+        output.push_str(&format!("{} ", index_to_letter_label(i)?));
+    }
+    output.push_str("┘");
+
+    output.push_str("\n\n");
+
+    output.push_str("For example:\n");
+    for (c1, c2) in vec![(0, 1), (1, 2), (2, 4), (0, 5)] {
+        if c1 >= matrix.nrows() || c2 >= matrix.ncols() {
+            continue;
+        }
+        let matval = matrix[(c1, c2)];
+
+        output.push_str(&format!(
+            "- In {matval} ballots, '{}' was preferred over '{}'\n",
+            option_id_to_option
+                .get(&(c1 as u32))
+                .ok_or("Unexpected OOB c1")?,
+            option_id_to_option
+                .get(&(c2 as u32))
+                .ok_or("Unexpected OOB c2")?,
+        ));
+    }
+
+    Ok(output)
+}
+
+#[test]
+fn test_pretty_print_outranking_matrix() {
+    let test_matrix = nalgebra::dmatrix![0, 2, 2, 3, 3;
+                               3, 0, 4, 3, 3;
+                               3, 1, 0, 3, 2;
+                               2, 2, 2, 0, 1;
+                               2, 2, 3, 4, 0];
+    let option_id_to_option = BTreeMap::from([
+        (0, "The Steerswoman".to_string()),
+        (1, "against a dark background".to_string()),
+        (2, "born a crime".to_string()),
+        (
+            3,
+            "TheSongOfAchillesButFooVotesForITForRealThisTime".to_string(),
+        ),
+        (4, "JACK REACHER -- whos secret is it anyway?!".to_string()),
+    ]);
+
+    let output = pretty_print_outranking_matrix(&test_matrix, &option_id_to_option)
+        .expect("Formatting should succeed");
+    println!("{output}");
+    assert!(output.contains("A. The Steerswoman"));
+    assert!(output.contains("┌"));
+    assert!(output.contains("└"));
+}
+
 impl Bot {
     async fn option_id_to_option(
         &self,
@@ -157,11 +280,12 @@ ORDER BY voter, rank ASC
             (Some(cv::WinType::CondorcetWinner), Some(winner), overall_outranking, _) => {
                 // clean condorcet winner
                 info!("Win via condorcet. Result:\n{}", result);
+
                 format!(
                     "Condorcet winner (unambiguous): {winner} - **{}**.
-Outranking matrix: ```{}```",
+                Outranking matrix: ```{}```",
                     option_id_to_option.get(&winner).unwrap(),
-                    overall_outranking,
+                    pretty_print_outranking_matrix(&overall_outranking, &option_id_to_option).unwrap_or_else(|e| format!("Failed to pretty-print outranking: {e:?}. Printing just the matrix instead:\n{overall_outranking}")) // overall_outranking,
                 )
             }
             (
@@ -185,7 +309,8 @@ Outranking matrix: ```{}```",
                 );
                 format!(
                     "Winner via Schulze method: {winner} - {}.\nSchulze ranking: {ranking_str}\nBase outranking matrix: ```{}```",
-                    option_id_to_option.get(&winner).unwrap(), overall_outranking,
+                    option_id_to_option.get(&winner).unwrap(),
+                    pretty_print_outranking_matrix(&overall_outranking, &option_id_to_option).unwrap_or_else(|e| format!("Failed to pretty-print outranking: {e:?}. Printing just the matrix instead:\n{overall_outranking}")) // overall_outranking,
                 )
             }
             (_, _, _, _) => {
