@@ -101,6 +101,7 @@ dependencies = [
 name = "ballotbot"
 version = "1.0.0"
 dependencies = [
+ "ballotbot-core",
  "fern",
  "humantime",
  "log",
@@ -108,6 +109,13 @@ dependencies = [
  "serenity",
  "sqlx",
  "tokio",
+]
+
+[[package]]
+name = "ballotbot-core"
+version = "0.1.0"
+dependencies = [
+ "nalgebra",
 ]
 
 [[package]]

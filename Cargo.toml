@@ -3,7 +3,12 @@ name = "ballotbot"
 version = "1.0.0"
 edition = "2024"
 
+[workspace]
+members = ["crates/ballotbot-core"]
+resolver = "3"
+
 [dependencies]
+ballotbot-core = { path = "crates/ballotbot-core" }
 log = "0.4"
 nalgebra = "0.33"
 humantime = "2"
