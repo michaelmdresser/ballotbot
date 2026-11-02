@@ -164,29 +164,6 @@ impl Bot {
             });
         return option_id_to_option;
     }
-    async fn option_to_option_id(
-        &self,
-        tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
-        session_id: i64,
-    ) -> BTreeMap<String, u32> {
-        let rows  = sqlx::query!(
-            "SELECT option_name, option_id FROM session_ballot_options WHERE session_id = ? ORDER BY ROWID",
-            session_id,
-        )
-        .fetch_all(&mut **tx)
-        .await
-        .unwrap();
-
-        let option_to_option_id: BTreeMap<String, u32> =
-            rows.into_iter().fold(BTreeMap::new(), |mut map, row| {
-                let option_name = row.option_name;
-                let option_id = row.option_id;
-                map.insert(option_name, u32::try_from(option_id).unwrap());
-                return map;
-            });
-        return option_to_option_id;
-    }
-
     async fn is_voting_complete(
         &self,
         vote_tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
@@ -239,15 +216,6 @@ ORDER BY voter, rank ASC
         .await
         .unwrap();
 
-        sqlx::query!(
-            "UPDATE voting_session SET status = 'finished' WHERE id = ?",
-            session_id,
-        )
-        .execute(&mut **vote_tx)
-        .await
-        .unwrap();
-
-        let option_to_option_id = self.option_to_option_id(vote_tx, session_id).await;
         let option_id_to_option = self.option_id_to_option(vote_tx, session_id).await;
 
         let ballots_by_user: BTreeMap<String, cv::Ballot> = votes.iter().fold(
@@ -266,58 +234,66 @@ ORDER BY voter, rank ASC
             },
         );
         let ballots: Vec<cv::Ballot> = ballots_by_user.into_values().collect();
-        info!("Ballots for finish_vote: {:?}", ballots);
-
-        let result = cv::vote(u32::try_from(option_to_option_id.len()).unwrap(), ballots).unwrap();
-        let result_cloned = result.clone();
-
-        let response: String = match (
-            result_cloned.win_type,
-            result_cloned.winner,
-            result_cloned.final_outranking,
-            result_cloned.schulze_result,
-        ) {
-            (Some(cv::WinType::CondorcetWinner), Some(winner), overall_outranking, _) => {
-                // clean condorcet winner
-                info!("Win via condorcet. Result:\n{}", result);
-
-                format!(
-                    "Condorcet winner (unambiguous): {winner} - **{}**.
-                Outranking matrix: ```{}```",
-                    option_id_to_option.get(&winner).unwrap(),
-                    pretty_print_outranking_matrix(&overall_outranking, &option_id_to_option).unwrap_or_else(|e| format!("Failed to pretty-print outranking: {e:?}. Printing just the matrix instead:\n{overall_outranking}")) // overall_outranking,
-                )
-            }
-            (
-                Some(cv::WinType::SchulzeRanking),
-                Some(winner),
-                overall_outranking,
-                Some(schulze_result),
-            ) => {
-                let ranking_str_untrimmed: String = schulze_result
-                    .0
-                    .into_iter()
-                    .fold("".to_string(), |acc: String, (choice, _)| {
-                        acc + &format!("{} > ", choice)
-                    });
-                let ranking_str = ranking_str_untrimmed
-                    .strip_suffix(" > ")
-                    .unwrap_or(&ranking_str_untrimmed);
-                info!(
-                    "Win via Schulze. Result:\n{}\nRanking: {ranking_str}",
-                    result,
-                );
-                format!(
-                    "Winner via Schulze method: {winner} - {}.\nSchulze ranking: {ranking_str}\nBase outranking matrix: ```{}```",
-                    option_id_to_option.get(&winner).unwrap(),
-                    pretty_print_outranking_matrix(&overall_outranking, &option_id_to_option).unwrap_or_else(|e| format!("Failed to pretty-print outranking: {e:?}. Printing just the matrix instead:\n{overall_outranking}")) // overall_outranking,
-                )
-            }
-            (_, _, _, _) => {
-                error!("Unsupported vote result: {:?}", result);
-                format!("Unsupported vote result: {:?}", result)
+        let candidate_ids: Vec<_> = option_id_to_option.keys().copied().collect();
+        let result = match cv::vote(&candidate_ids, ballots) {
+            Ok(result) => result,
+            Err(err) => {
+                error!("Cannot calculate aggregate vote result: {err}");
+                return;
             }
         };
+        let winners = result
+            .winners
+            .iter()
+            .map(|id| {
+                let key = u32::try_from(id.0).map_err(|_| "Invalid winner identity")?;
+                let label = option_id_to_option.get(&key).ok_or("Missing winner label")?;
+                Ok(format!("{} - {label}", id.0))
+            })
+            .collect::<Result<Vec<_>, &str>>();
+        let winners = match winners {
+            Ok(winners) => winners.join(", "),
+            Err(err) => {
+                error!("Cannot present aggregate vote result: {err}");
+                return;
+            }
+        };
+        // Pairwise rows follow candidate_ids, never a map keyed by label.
+        let dense_labels = option_id_to_option
+            .values()
+            .enumerate()
+            .map(|(index, label)| u32::try_from(index).map(|index| (index, label.clone())))
+            .collect::<Result<BTreeMap<_, _>, _>>();
+        let dense_labels = match dense_labels {
+            Ok(labels) => labels,
+            Err(err) => {
+                error!("Cannot present aggregate candidate labels: {err}");
+                return;
+            }
+        };
+        let matrix = pretty_print_outranking_matrix(&result.pairwise, &dense_labels)
+            .unwrap_or_else(|_| result.pairwise.to_string());
+        let outcome = if result.winners.len() > 1 {
+            "Tied winners"
+        } else {
+            "Winner"
+        };
+        let method = match result.method {
+            ballotbot_core::Method::Condorcet => "Condorcet (beats every other candidate head-to-head)",
+            ballotbot_core::Method::SchulzeWinningVotes => "Schulze (winning-votes strongest paths)",
+        };
+        let response = format!("{outcome} via {method}: {winners}.\nPairwise matrix: ```{matrix}```");
+
+        if let Err(err) = sqlx::query!(
+            "UPDATE voting_session SET status = 'finished' WHERE id = ?",
+            session_id,
+        )
+        .execute(&mut **vote_tx)
+        .await
+        {
+            error!("Cannot finish voting session: {err}");
+            return;
+        }
 
         match channel.say(&ctx, response).await {
             Ok(_) => {}
